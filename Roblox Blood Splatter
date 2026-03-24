@@ -1,0 +1,65 @@
+local model = script.Parent
+local bloodTexture = "rbxassetid://YOUR_TEXTURE_ID"
+
+local bloodFolder = workspace:FindFirstChild("BloodMarks")
+
+if not bloodFolder then
+	bloodFolder = Instance.new("Folder")
+	bloodFolder.Name = "BloodMarks"
+	bloodFolder.Parent = workspace
+end
+
+local debounceTable = {}
+
+local function createBlood(position, normal)
+	local bloodPart = Instance.new("Part")
+	bloodPart.Size = Vector3.new(2,2,0.05)
+	bloodPart.Anchored = true
+	bloodPart.CanCollide = false
+	bloodPart.Transparency = 1
+	bloodPart.Parent = bloodFolder
+
+	bloodPart.CFrame = CFrame.new(position, position + normal) * CFrame.new(0,0,-0.03)
+
+	local decal = Instance.new("Decal")
+	decal.Texture = bloodTexture
+	decal.Face = Enum.NormalId.Front
+	decal.Parent = bloodPart
+end
+
+local function connectLimb(limb)
+	debounceTable[limb] = false
+
+	limb.Touched:Connect(function(hit)
+		if debounceTable[limb] then return end
+		if not hit then return end
+		if hit:IsDescendantOf(model) then return end
+
+		local speed = limb.Velocity.Magnitude
+		if speed < 5 then return end
+
+		debounceTable[limb] = true
+
+		local rayOrigin = limb.Position
+		local rayDirection = (hit.Position - limb.Position).Unit * 5
+
+		local raycastParams = RaycastParams.new()
+		raycastParams.FilterDescendantsInstances = {model}
+		raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+
+		local result = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+
+		if result then
+			createBlood(result.Position, result.Normal)
+		end
+
+		task.wait(0.2)
+		debounceTable[limb] = false
+	end)
+end
+
+for _, limb in pairs(model:GetChildren()) do
+	if limb:IsA("BasePart") then
+		connectLimb(limb)
+	end
+end
