@@ -3,26 +3,38 @@ local RunService = game:GetService("RunService")
 local AnimationPlayer = {}
 local States = {}
 
--- get per-character state
 local function getState(character)
 	if not States[character] then
-		States[character] = { token = 0 }
+		States[character] = {
+			token = 0,
+			baseC0 = {}
+		}
+
+		-- store original joint offsets ONCE
+		for _, obj in ipairs(character:GetDescendants()) do
+			if obj:IsA("Motor6D") then
+				States[character].baseC0[obj.Name] = obj.C0
+			end
+		end
 	end
 	return States[character]
 end
 
--- apply pose with tween
-local function tweenPose(character, frame, duration, speed, tokenRef)
+local function tweenPose(character, frame, duration, speed, state, tokenRef)
 	local joints = {}
 
 	for jointName, info in pairs(frame) do
 		local joint = character:FindFirstChild(jointName, true)
+
 		if joint and joint:IsA("Motor6D") then
-			table.insert(joints, {
-				joint = joint,
-				start = joint.C0,
-				target = info.CFrame
-			})
+			local base = state.baseC0[jointName]
+			if base then
+				table.insert(joints, {
+					joint = joint,
+					start = joint.C0,
+					target = base * info.CFrame -- 🔥 IMPORTANT FIX
+				})
+			end
 		end
 	end
 
@@ -42,13 +54,11 @@ local function tweenPose(character, frame, duration, speed, tokenRef)
 		end
 	end
 
-	-- snap final
 	for _, j in ipairs(joints) do
 		j.joint.C0 = j.target
 	end
 end
 
--- main play function
 function AnimationPlayer.Play(character, animTable, looped, speed)
 	if not character or not animTable then return end
 
@@ -67,20 +77,18 @@ function AnimationPlayer.Play(character, animTable, looped, speed)
 
 				local frame = animTable[i]
 
-				-- get duration (from any joint)
 				local duration = 0
 				for _, info in pairs(frame) do
 					duration = info.TimeLength or 0
 					break
 				end
 
-				tweenPose(character, frame, duration, speed, tokenRef)
+				tweenPose(character, frame, duration, speed, state, tokenRef)
 			end
 		until not looped
 	end)
 end
 
--- stop animation
 function AnimationPlayer.Stop(character)
 	if States[character] then
 		States[character].token += 1
