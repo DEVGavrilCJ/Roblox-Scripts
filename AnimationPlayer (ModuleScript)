@@ -1,0 +1,90 @@
+local RunService = game:GetService("RunService")
+
+local AnimationPlayer = {}
+local States = {}
+
+-- get per-character state
+local function getState(character)
+	if not States[character] then
+		States[character] = { token = 0 }
+	end
+	return States[character]
+end
+
+-- apply pose with tween
+local function tweenPose(character, frame, duration, speed, tokenRef)
+	local joints = {}
+
+	for jointName, info in pairs(frame) do
+		local joint = character:FindFirstChild(jointName, true)
+		if joint and joint:IsA("Motor6D") then
+			table.insert(joints, {
+				joint = joint,
+				start = joint.C0,
+				target = info.CFrame
+			})
+		end
+	end
+
+	local t = 0
+	duration = (duration or 0) / (speed or 1)
+
+	while t < duration do
+		if tokenRef.stop then return end
+
+		local dt = RunService.RenderStepped:Wait()
+		t += dt
+
+		local alpha = math.clamp(t / duration, 0, 1)
+
+		for _, j in ipairs(joints) do
+			j.joint.C0 = j.start:Lerp(j.target, alpha)
+		end
+	end
+
+	-- snap final
+	for _, j in ipairs(joints) do
+		j.joint.C0 = j.target
+	end
+end
+
+-- main play function
+function AnimationPlayer.Play(character, animTable, looped, speed)
+	if not character or not animTable then return end
+
+	local state = getState(character)
+	state.token += 1
+
+	local tokenRef = { id = state.token, stop = false }
+
+	task.spawn(function()
+		repeat
+			for i = 1, #animTable do
+				if state.token ~= tokenRef.id then
+					tokenRef.stop = true
+					return
+				end
+
+				local frame = animTable[i]
+
+				-- get duration (from any joint)
+				local duration = 0
+				for _, info in pairs(frame) do
+					duration = info.TimeLength or 0
+					break
+				end
+
+				tweenPose(character, frame, duration, speed, tokenRef)
+			end
+		until not looped
+	end)
+end
+
+-- stop animation
+function AnimationPlayer.Stop(character)
+	if States[character] then
+		States[character].token += 1
+	end
+end
+
+return AnimationPlayer
