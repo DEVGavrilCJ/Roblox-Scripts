@@ -1,0 +1,108 @@
+--// SERVICES
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+
+--// PLAYER
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local root = character:WaitForChild("HumanoidRootPart")
+
+--// LOAD IK MODULE
+local R6IK = require(game.ReplicatedStorage:WaitForChild("R6IK"))
+
+--// SETTINGS
+local STEP_DISTANCE = 2          -- how far before stepping
+local STEP_HEIGHT = 1           -- how high the foot lifts
+local STEP_SPEED = 6            -- speed of stepping
+local RAY_LENGTH = 6
+
+--// FOOT STATE
+local feet = {
+    Right = {
+        offset = Vector3.new(1, -2, 0),
+        plantedPos = nil,
+        currentPos = nil,
+        stepping = false,
+        stepT = 0
+    },
+
+    Left = {
+        offset = Vector3.new(-1, -2, 0),
+        plantedPos = nil,
+        currentPos = nil,
+        stepping = false,
+        stepT = 0
+    }
+}
+
+--// RAYCAST FUNCTION
+local function getGroundPosition(worldPos)
+    local ray = workspace:Raycast(
+        worldPos,
+        Vector3.new(0, -RAY_LENGTH, 0)
+    )
+
+    if ray then
+        return ray.Position
+    else
+        return worldPos
+    end
+end
+
+--// STEP FUNCTION
+local function updateFoot(foot, dt)
+    local worldOrigin = (root.CFrame * CFrame.new(foot.offset)).Position
+    local target = getGroundPosition(worldOrigin)
+
+    -- initialize
+    if not foot.plantedPos then
+        foot.plantedPos = target
+        foot.currentPos = target
+    end
+
+    local dist = (foot.plantedPos - target).Magnitude
+
+    -- start stepping
+    if not foot.stepping and dist > STEP_DISTANCE then
+        foot.stepping = true
+        foot.stepT = 0
+        foot.startPos = foot.currentPos
+        foot.endPos = target
+    end
+
+    -- stepping motion
+    if foot.stepping then
+        foot.stepT += dt * STEP_SPEED
+
+        local t = math.clamp(foot.stepT, 0, 1)
+
+        -- arc motion
+        local mid = (foot.startPos + foot.endPos) / 2 + Vector3.new(0, STEP_HEIGHT, 0)
+
+        local p1 = foot.startPos:Lerp(mid, t)
+        local p2 = mid:Lerp(foot.endPos, t)
+        foot.currentPos = p1:Lerp(p2, t)
+
+        if t >= 1 then
+            foot.stepping = false
+            foot.plantedPos = foot.endPos
+            foot.currentPos = foot.endPos
+        end
+    else
+        -- stay planted
+        foot.currentPos = foot.plantedPos
+    end
+
+    return foot.currentPos
+end
+
+--// MAIN LOOP
+RunService.RenderStepped:Connect(function(dt)
+    -- update both feet
+    local rightPos = updateFoot(feet.Right, dt)
+    local leftPos = updateFoot(feet.Left, dt)
+
+    -- APPLY IK
+    R6IK:SolveLeg(character, "Right", rightPos)
+    R6IK:SolveLeg(character, "Left", leftPos)
+end)
