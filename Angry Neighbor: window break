@@ -1,0 +1,20 @@
+print("put this thing in serverscriptservice, thx")
+
+local function breakWindow(window)
+	window.Transparency = 1
+	window.CanCollide = false
+end
+
+workspace.DescendantAdded:Connect(function(obj)
+	if obj:IsA("BasePart") then
+		obj.Touched:Connect(function(hit)
+			if hit.Name == "window" then
+				local velocity = obj.AssemblyLinearVelocity.Magnitude
+
+				if velocity > 8 then
+					breakWindow(hit)
+				end
+			end
+		end)
+	end
+end)
