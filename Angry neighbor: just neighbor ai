@@ -1,0 +1,145 @@
+print("scatman is best")
+
+local npc = script.Parent
+local humanoid = npc:WaitForChild("Humanoid")
+local root = npc:WaitForChild("HumanoidRootPart")
+local animstate = npc:WaitForChild("animstate")
+
+local Players = game:GetService("Players")
+local PathfindingService = game:GetService("PathfindingService")
+
+local State = "Idle"
+local lastSeenTime = 0
+
+local WALK_SPEED = 10
+local CHASE_SPEED = 30
+local VISION_DISTANCE = 60
+
+------------------------------------------------
+-- GET PLAYER
+------------------------------------------------
+
+local function getPlayer()
+	for _, p in pairs(Players:GetPlayers()) do
+		if p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+			return p
+		end
+	end
+end
+
+------------------------------------------------
+-- VISION CHECK
+------------------------------------------------
+
+local function canSeePlayer(player)
+	if not player or not player.Character then return false end
+
+	local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+	if not hrp then return false end
+
+	local distance = (hrp.Position - root.Position).Magnitude
+	if distance > VISION_DISTANCE then return false end
+
+	-- simple raycast
+	local rayParams = RaycastParams.new()
+	rayParams.FilterDescendantsInstances = {npc}
+	rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+
+	local result = workspace:Raycast(root.Position, (hrp.Position - root.Position), rayParams)
+
+	if result and not result.Instance:IsDescendantOf(player.Character) then
+		return false
+	end
+
+	return true
+end
+
+------------------------------------------------
+-- PATHFIND
+------------------------------------------------
+
+local function moveTo(pos)
+	local path = PathfindingService:CreatePath({
+		AgentCanJump = true,
+		AgentRadius = 2,
+		AgentHeight = 5
+	})
+
+	path:ComputeAsync(root.Position, pos)
+
+	if path.Status == Enum.PathStatus.Success then
+		for _, wp in ipairs(path:GetWaypoints()) do
+			if State ~= "Chase" then return end
+			humanoid:MoveTo(wp.Position)
+			humanoid.MoveToFinished:Wait()
+		end
+	end
+end
+
+------------------------------------------------
+-- IDLE
+------------------------------------------------
+
+local function getRandomIdle()
+	local folder = workspace:WaitForChild("idlestuff")
+	local parts = folder:GetChildren()
+	if #parts == 0 then return nil end
+	return parts[math.random(1, #parts)]
+end
+
+local function doIdle()
+	humanoid.WalkSpeed = WALK_SPEED
+	animstate.Value = "walk"
+
+	local target = getRandomIdle()
+	if target then
+		humanoid:MoveTo(target.Position)
+		humanoid.MoveToFinished:Wait()
+	end
+
+	animstate.Value = "idle"
+	task.wait(math.random(2,4))
+end
+
+------------------------------------------------
+-- MAIN LOOP
+------------------------------------------------
+
+while task.wait(0.2) do
+	local player = getPlayer()
+
+	-- SEE PLAYER → CHASE
+	if player and canSeePlayer(player) then
+		State = "Chase"
+		lastSeenTime = tick()
+	end
+
+	------------------------------------------------
+	-- CHASE STATE
+	------------------------------------------------
+	if State == "Chase" then
+		humanoid.WalkSpeed = CHASE_SPEED
+		animstate.Value = "run"
+
+		if player and player.Character then
+			local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+			if hrp then
+				humanoid:MoveTo(hrp.Position)
+			end
+		end
+
+		-- LOST PLAYER
+		if not (player and canSeePlayer(player)) then
+			if tick() - lastSeenTime > 3 then
+				State = "Idle"
+			end
+		end
+	end
+
+	------------------------------------------------
+	-- IDLE STATE
+	------------------------------------------------
+	if State == "Idle" then
+		doIdle()
+	end
+end
