@@ -1,0 +1,7 @@
+print("yo gurt")
+
+root.Touched:Connect(function(hit)
+	if hit.Name == "door" and hit.Transparency == 0 then
+		hit:Destroy()
+	end
+end)
