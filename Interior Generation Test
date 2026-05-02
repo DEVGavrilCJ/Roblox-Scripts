@@ -1,33 +1,35 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local InteriorsFolder = ReplicatedStorage:WaitForChild("Interiors")
-local MainRoom = workspace:WaitForChild("MainRoom")
+local MainRoom = Workspace:WaitForChild("MainRoom")
 
-local MAX_ROOMS = 20
-
-local usedDoors = {}
+local MAX_ROOMS = 20  -- Total number of interiors to spawn
 local roomCount = 0
 
--- Get all door models from a room model
-local function getDoors(model)
-	local doors = {}
+local usedDoors = {}
 
-	for _, obj in pairs(model:GetDescendants()) do
+-- Get all door models from a room (MainRoom or Interior)
+local function getDoors(roomModel)
+	local doors = {}
+	for _, obj in pairs(roomModel:GetDescendants()) do
 		if obj:IsA("Model") and obj:FindFirstChild("Base") then
 			if string.find(obj.Name, "Door") then
 				table.insert(doors, obj)
 			end
 		end
 	end
-
 	return doors
 end
 
+-- Pick a random interior model
 local function getRandomInterior()
-	local list = InteriorsFolder:GetChildren()
-	return list[math.random(1, #list)]:Clone()
+	local interiors = InteriorsFolder:GetChildren()
+	if #interiors == 0 then return nil end
+	return interiors[math.random(1, #interiors)]:Clone()
 end
 
+-- Get the first door inside an interior
 local function getInteriorDoor(interior)
 	for _, obj in pairs(interior:GetDescendants()) do
 		if obj:IsA("Model") and obj:FindFirstChild("Base") then
@@ -39,11 +41,10 @@ local function getInteriorDoor(interior)
 	return nil
 end
 
--- Snap system
+-- Snap interior so its door aligns with mainDoor
 local function placeInterior(mainDoor, interior)
 	local mainBase = mainDoor:FindFirstChild("Base")
 	local interiorDoor = getInteriorDoor(interior)
-
 	if not mainBase or not interiorDoor then return false end
 
 	local interiorBase = interiorDoor:FindFirstChild("Base")
@@ -53,15 +54,14 @@ local function placeInterior(mainDoor, interior)
 	local targetPivot = mainBase.CFrame * offset
 
 	interior:PivotTo(targetPivot)
-
 	return true
 end
 
--- MAIN GENERATION SYSTEM
-local function generate()
+-- Main generation function
+local function generateInteriors()
 	local queue = {}
 
-	-- start with MainRoom doors
+	-- Start with MainRoom doors
 	for _, door in ipairs(getDoors(MainRoom)) do
 		table.insert(queue, door)
 	end
@@ -74,7 +74,9 @@ local function generate()
 		end
 
 		local interior = getRandomInterior()
-		interior.Parent = workspace
+		if not interior then break end
+
+		interior.Parent = Workspace
 
 		local success = placeInterior(mainDoor, interior)
 
@@ -82,14 +84,17 @@ local function generate()
 			usedDoors[mainDoor] = true
 			roomCount += 1
 
-			-- STOP ROOM CHECK
+			-- Stop room: end only this branch
 			if interior.Name == "Stop" then
-				continue -- no expansion
+				continue
 			end
 
-			-- ADD NEW DOORS TO QUEUE (THIS WAS MISSING)
+			-- Add new interior doors to queue for expansion
 			for _, newDoor in ipairs(getDoors(interior)) do
-				table.insert(queue, newDoor)
+				-- Skip interior doors already aligned to mainDoor
+				if newDoor ~= getInteriorDoor(interior) then
+					table.insert(queue, newDoor)
+				end
 			end
 		else
 			interior:Destroy()
@@ -97,4 +102,4 @@ local function generate()
 	end
 end
 
-generate()
+generateInteriors()
