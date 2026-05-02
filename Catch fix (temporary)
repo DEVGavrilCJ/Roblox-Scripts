@@ -1,0 +1,83 @@
+local tool = script.Parent
+
+local Players = game:GetService("Players")
+
+local CHASE_SPEED = 23
+local CATCH_DISTANCE = 8
+local CATCH_DAMAGE = 999
+
+local chasingCharacter = nil
+local chasingPlayer = nil
+
+local function getCharacterFromPart(part)
+	if not part then return nil end
+	return part:FindFirstAncestorOfClass("Model")
+end
+
+local function getHRP(char)
+	return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function getHumanoid(char)
+	return char and char:FindFirstChild("Humanoid")
+end
+
+-- START CHASE
+tool.RemoteEvent.OnServerEvent:Connect(function(player, part)
+	if chasingCharacter then return end
+
+	local targetChar = getCharacterFromPart(part)
+	if not targetChar then return end
+
+	local targetHumanoid = getHumanoid(targetChar)
+	if not targetHumanoid or targetHumanoid.Health <= 0 then return end
+
+	local targetPlayer = Players:GetPlayerFromCharacter(targetChar)
+	if not targetPlayer then return end
+
+	chasingCharacter = targetChar
+	chasingPlayer = targetPlayer
+
+	-- optional: notify clients here
+end)
+
+-- STOP CHASE (manual cancel / fail-safe)
+tool.stop.OnServerEvent:Connect(function(player)
+	chasingCharacter = nil
+	chasingPlayer = nil
+end)
+
+-- CATCH
+tool.catch.OnServerEvent:Connect(function(player, part)
+	if not chasingCharacter then return end
+
+	local targetChar = getCharacterFromPart(part)
+	if targetChar ~= chasingCharacter then return end
+
+	local attackerChar = player.Character
+	local attackerHRP = getHRP(attackerChar)
+	local targetHRP = getHRP(targetChar)
+
+	if not attackerHRP or not targetHRP then return end
+
+	-- distance check (IMPORTANT)
+	local dist = (attackerHRP.Position - targetHRP.Position).Magnitude
+	if dist > CATCH_DISTANCE then return end
+
+	local humanoid = getHumanoid(targetChar)
+	if not humanoid then return end
+
+	-- “goofy delay moment” (your style)
+	task.wait(0.2)
+
+	-- final validation again (prevents race bugs)
+	if chasingCharacter ~= targetChar then return end
+	if humanoid.Health <= 0 then return end
+
+	-- kill
+	humanoid:TakeDamage(CATCH_DAMAGE)
+
+	-- reset system
+	chasingCharacter = nil
+	chasingPlayer = nil
+end)
