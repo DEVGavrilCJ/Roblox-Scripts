@@ -1,0 +1,90 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local InteriorsFolder = ReplicatedStorage:WaitForChild("Interiors")
+local MainRoom = workspace:WaitForChild("MainRoom")
+
+local usedDoors = {}
+
+-- Get all MainRoom doors (Models)
+local function getMainDoors()
+	local doors = {}
+
+	for _, obj in pairs(MainRoom:GetDescendants()) do
+		if obj:IsA("Model") and obj:FindFirstChild("Base") then
+			if string.find(obj.Name, "Door") then
+				table.insert(doors, obj)
+			end
+		end
+	end
+
+	return doors
+end
+
+-- Get random interior
+local function getRandomInterior()
+	local list = InteriorsFolder:GetChildren()
+	return list[math.random(1, #list)]:Clone()
+end
+
+-- Find first interior door
+local function getInteriorDoor(interior)
+	for _, obj in pairs(interior:GetDescendants()) do
+		if obj:IsA("Model") and obj:FindFirstChild("Base") then
+			if string.find(obj.Name, "Door") then
+				return obj
+			end
+		end
+	end
+	return nil
+end
+
+-- Snap using Base parts
+local function placeInterior(mainDoor, interior)
+	local mainBase = mainDoor:FindFirstChild("Base")
+	local interiorDoor = getInteriorDoor(interior)
+
+	if not mainBase or not interiorDoor then
+		warn("Missing Base in door system:", mainDoor, interior)
+		return
+	end
+
+	local interiorBase = interiorDoor:FindFirstChild("Base")
+
+	if not interiorBase then
+		warn("Interior door missing Base:", interior.Name)
+		return
+	end
+
+	-- Compute offset from interior pivot to its door base
+	local offset = interiorBase.CFrame:Inverse() * interior:GetPivot()
+
+	-- Align interior door base to main door base
+	local targetPivot = mainBase.CFrame * offset
+
+	interior:PivotTo(targetPivot)
+end
+
+local function generate()
+	local doors = getMainDoors()
+
+	for _, mainDoor in ipairs(doors) do
+		if usedDoors[mainDoor] then
+			continue
+		end
+
+		local interior = getRandomInterior()
+		interior.Parent = workspace
+
+		placeInterior(mainDoor, interior)
+
+		usedDoors[mainDoor] = true
+
+		-- Stop room logic (simple terminal rule)
+		if interior.Name == "Stop" then
+			-- do not expand further
+			continue
+		end
+	end
+end
+
+generate()
