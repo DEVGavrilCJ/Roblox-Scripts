@@ -1,49 +1,71 @@
--- Roblox Lua: Simple branching generator
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local RoomsFolder = ReplicatedStorage:WaitForChild("Rooms")
+local ItemsFolder = ReplicatedStorage:WaitForChild("ClickObjects")
+
 local MainRoom = Workspace:WaitForChild("MainRoom")
+local GeneratedFolder = Workspace:WaitForChild("Generated")
 
 local MAX_ROOMS = 20
+local ITEM_CHANCE = 0.25 -- 25% chance per room
+
 local roomCount = 0
-
--- Track doors that have already spawned something
 local usedDoors = {}
+local spawnedRooms = {}
 
--- Get all doors (Models with a Base part) in a room
-local function getDoors(roomModel)
+local keySpawned = false
+
+--------------------------------------------------
+-- UTIL
+--------------------------------------------------
+
+local function getDoors(model)
 	local doors = {}
-	for _, obj in pairs(roomModel:GetDescendants()) do
+	for _, obj in pairs(model:GetDescendants()) do
 		if obj:IsA("Model") and obj:FindFirstChild("Base") then
-			if string.find(obj.Name, "Door") then
-				table.insert(doors, obj)
-			end
+			table.insert(doors, obj)
 		end
 	end
 	return doors
 end
 
--- Pick a random room from Rooms folder
-local function getRandomRoom()
-	local list = RoomsFolder:GetChildren()
-	if #list == 0 then return nil end
-	return list[math.random(1, #list)]:Clone()
-end
-
--- Find the first door inside a room
 local function getRoomDoor(room)
 	for _, obj in pairs(room:GetDescendants()) do
 		if obj:IsA("Model") and obj:FindFirstChild("Base") then
-			if string.find(obj.Name, "Door") then
-				return obj
-			end
+			return obj
 		end
 	end
 	return nil
 end
 
--- Align room door to mainDoor's Base
+local function getRandomRoom()
+	local list = {}
+	for _, r in ipairs(RoomsFolder:GetChildren()) do
+		if r.Name ~= "Stop" then
+			table.insert(list, r)
+		end
+	end
+	if #list == 0 then return nil end
+	return list[math.random(1, #list)]:Clone()
+end
+
+local function getStopRoom()
+	local stop = RoomsFolder:FindFirstChild("Stop")
+	if not stop then return nil end
+	return stop:Clone()
+end
+
+local function getRandomItem()
+	local list = ItemsFolder:GetChildren()
+	if #list == 0 then return nil end
+	return list[math.random(1, #list)]:Clone()
+end
+
+--------------------------------------------------
+-- SNAP (NO OFFSET)
+--------------------------------------------------
+
 local function placeRoom(mainDoor, room)
 	local mainBase = mainDoor:FindFirstChild("Base")
 	local roomDoor = getRoomDoor(room)
@@ -52,46 +74,132 @@ local function placeRoom(mainDoor, room)
 	local roomBase = roomDoor:FindFirstChild("Base")
 	if not roomBase then return false end
 
-	local offset = roomBase.CFrame:Inverse() * room:GetPivot()
-	local targetPivot = mainBase.CFrame * offset
-
-	room:PivotTo(targetPivot)
+	-- Direct snap (simple + stable)
+	room:PivotTo(mainBase.CFrame * CFrame.Angles(0, math.rad(180), 0))
 	return true
 end
 
--- Recursive generation function
+--------------------------------------------------
+-- ITEM SYSTEM
+--------------------------------------------------
+
+local function spawnItemInRoom(room)
+	local itemSpawn = room:FindFirstChild("Item", true)
+	if not itemSpawn then return end
+
+	-- Chance check
+	if math.random() > ITEM_CHANCE then return end
+
+	local item
+
+	-- Handle key (spawn once)
+	if not keySpawned and math.random() < 0.2 then
+		item = ItemsFolder:FindFirstChild("Key")
+		if item then
+			keySpawned = true
+		end
+	end
+
+	-- If no key, spawn random item
+	if not item then
+		item = getRandomItem()
+	end
+
+	if not item then return end
+
+	local cloned = item:Clone()
+	cloned.Parent = GeneratedFolder
+
+	-- Simple pivot (no offset)
+	if cloned:IsA("Model") then
+		cloned:PivotTo(itemSpawn.CFrame)
+	elseif cloned:IsA("BasePart") then
+		cloned.CFrame = itemSpawn.CFrame
+	end
+end
+
+--------------------------------------------------
+-- GENERATION
+--------------------------------------------------
+
 local function spawnFromDoor(mainDoor)
-	if roomCount >= MAX_ROOMS then return end
 	if usedDoors[mainDoor] then return end
+
+	-- Max reached → place Stop
+	if roomCount >= MAX_ROOMS then
+		local stop = getStopRoom()
+		if stop then
+			stop.Parent = GeneratedFolder
+			placeRoom(mainDoor, stop)
+		end
+		usedDoors[mainDoor] = true
+		return
+	end
 
 	local room = getRandomRoom()
 	if not room then return end
 
-	room.Parent = Workspace
-	local success = placeRoom(mainDoor, room)
-	if not success then
+	room.Parent = GeneratedFolder
+
+	if not placeRoom(mainDoor, room) then
 		room:Destroy()
 		return
 	end
 
 	roomCount += 1
 	usedDoors[mainDoor] = true
+	table.insert(spawnedRooms, room)
 
-	-- Stop room: do not expand from this room
-	if room.Name == "Stop" then
+	-- Spawn item
+	spawnItemInRoom(room)
+
+	local doors = getDoors(room)
+
+	-- Dead end → force Stop
+	if #doors <= 1 then
+		local stop = getStopRoom()
+		if stop then
+			stop.Parent = GeneratedFolder
+			placeRoom(doors[1], stop)
+		end
 		return
 	end
 
-	-- Spawn further from other doors inside this room
-	for _, newDoor in ipairs(getDoors(room)) do
-		-- skip the door used to connect to parent
+	-- Expand
+	for _, newDoor in ipairs(doors) do
 		if newDoor ~= getRoomDoor(room) then
 			spawnFromDoor(newDoor)
 		end
 	end
 end
 
--- Start generation from MainRoom doors
+--------------------------------------------------
+-- START
+--------------------------------------------------
+
 for _, door in ipairs(getDoors(MainRoom)) do
 	spawnFromDoor(door)
+end
+
+--------------------------------------------------
+-- GUARANTEE KEY SPAWN
+--------------------------------------------------
+
+if not keySpawned and #spawnedRooms > 0 then
+	local randomRoom = spawnedRooms[math.random(1, #spawnedRooms)]
+	local itemSpawn = randomRoom:FindFirstChild("Item", true)
+
+	if itemSpawn then
+		local key = ItemsFolder:FindFirstChild("Key")
+		if key then
+			local cloned = key:Clone()
+			cloned.Parent = GeneratedFolder
+
+			if cloned:IsA("Model") then
+				cloned:PivotTo(itemSpawn.CFrame)
+			elseif cloned:IsA("BasePart") then
+				cloned.CFrame = itemSpawn.CFrame
+			end
+		end
+	end
 end
