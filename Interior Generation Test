@@ -8,12 +8,11 @@ local MainRoom = Workspace:WaitForChild("MainRoom")
 local GeneratedFolder = Workspace:WaitForChild("Generated")
 
 local MAX_ROOMS = 20
-local ITEM_CHANCE = 0.25 -- 25% chance per room
+local ITEM_CHANCE = 0.25
 
 local roomCount = 0
 local usedDoors = {}
 local spawnedRooms = {}
-
 local keySpawned = false
 
 --------------------------------------------------
@@ -63,7 +62,7 @@ local function getRandomItem()
 end
 
 --------------------------------------------------
--- SNAP (NO OFFSET)
+-- SNAP (NO OFFSET, SIMPLE + RELIABLE)
 --------------------------------------------------
 
 local function placeRoom(mainDoor, room)
@@ -74,7 +73,7 @@ local function placeRoom(mainDoor, room)
 	local roomBase = roomDoor:FindFirstChild("Base")
 	if not roomBase then return false end
 
-	-- Direct snap (simple + stable)
+	-- Snap directly + face opposite
 	room:PivotTo(mainBase.CFrame * CFrame.Angles(0, math.rad(180), 0))
 	return true
 end
@@ -87,12 +86,11 @@ local function spawnItemInRoom(room)
 	local itemSpawn = room:FindFirstChild("Item", true)
 	if not itemSpawn then return end
 
-	-- Chance check
 	if math.random() > ITEM_CHANCE then return end
 
 	local item
 
-	-- Handle key (spawn once)
+	-- Try spawn key once
 	if not keySpawned and math.random() < 0.2 then
 		item = ItemsFolder:FindFirstChild("Key")
 		if item then
@@ -100,7 +98,6 @@ local function spawnItemInRoom(room)
 		end
 	end
 
-	-- If no key, spawn random item
 	if not item then
 		item = getRandomItem()
 	end
@@ -110,7 +107,6 @@ local function spawnItemInRoom(room)
 	local cloned = item:Clone()
 	cloned.Parent = GeneratedFolder
 
-	-- Simple pivot (no offset)
 	if cloned:IsA("Model") then
 		cloned:PivotTo(itemSpawn.CFrame)
 	elseif cloned:IsA("BasePart") then
@@ -125,14 +121,8 @@ end
 local function spawnFromDoor(mainDoor)
 	if usedDoors[mainDoor] then return end
 
-	-- Max reached → place Stop
+	-- If max reached → don't spawn new rooms
 	if roomCount >= MAX_ROOMS then
-		local stop = getStopRoom()
-		if stop then
-			stop.Parent = GeneratedFolder
-			placeRoom(mainDoor, stop)
-		end
-		usedDoors[mainDoor] = true
 		return
 	end
 
@@ -150,22 +140,11 @@ local function spawnFromDoor(mainDoor)
 	usedDoors[mainDoor] = true
 	table.insert(spawnedRooms, room)
 
-	-- Spawn item
 	spawnItemInRoom(room)
 
 	local doors = getDoors(room)
 
-	-- Dead end → force Stop
-	if #doors <= 1 then
-		local stop = getStopRoom()
-		if stop then
-			stop.Parent = GeneratedFolder
-			placeRoom(doors[1], stop)
-		end
-		return
-	end
-
-	-- Expand
+	-- Expand from other doors
 	for _, newDoor in ipairs(doors) do
 		if newDoor ~= getRoomDoor(room) then
 			spawnFromDoor(newDoor)
@@ -174,11 +153,39 @@ local function spawnFromDoor(mainDoor)
 end
 
 --------------------------------------------------
--- START
+-- START GENERATION
 --------------------------------------------------
 
 for _, door in ipairs(getDoors(MainRoom)) do
 	spawnFromDoor(door)
+end
+
+--------------------------------------------------
+-- FINAL PASS: SEAL ALL UNUSED DOORS
+--------------------------------------------------
+
+local allRooms = {MainRoom}
+for _, r in ipairs(spawnedRooms) do
+	table.insert(allRooms, r)
+end
+
+for _, room in ipairs(allRooms) do
+	for _, door in ipairs(getDoors(room)) do
+		if not usedDoors[door] then
+			local stop = getStopRoom()
+			if stop then
+				stop.Parent = GeneratedFolder
+
+				local success = placeRoom(door, stop)
+				if success then
+					usedDoors[door] = true
+				else
+					stop:Destroy()
+					warn("Failed to place Stop room:", door)
+				end
+			end
+		end
+	end
 end
 
 --------------------------------------------------
