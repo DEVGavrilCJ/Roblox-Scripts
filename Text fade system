@@ -1,0 +1,40 @@
+local TweenService = game:GetService("TweenService")
+local gui = script.Parent
+
+-- Make everything visible instantly
+for _, obj in ipairs(gui:GetDescendants()) do
+	if obj:IsA("TextLabel") or obj:IsA("TextButton") then
+		obj.TextTransparency = 0
+	elseif obj:IsA("ImageLabel") or obj:IsA("ImageButton") then
+		obj.ImageTransparency = 0
+	elseif obj:IsA("Frame") then
+		obj.BackgroundTransparency = 0
+	end
+end
+
+gui.Enabled = true
+
+-- Wait before fading
+task.wait(1)
+
+-- Fade everything
+for _, obj in ipairs(gui:GetDescendants()) do
+	local props = {}
+
+	if obj:IsA("TextLabel") or obj:IsA("TextButton") then
+		props.TextTransparency = 1
+	elseif obj:IsA("ImageLabel") or obj:IsA("ImageButton") then
+		props.ImageTransparency = 1
+	elseif obj:IsA("Frame") then
+		props.BackgroundTransparency = 1
+	end
+
+	if next(props) then
+		TweenService:Create(obj, TweenInfo.new(1), props):Play()
+	end
+end
+
+-- Wait for fade to finish
+task.wait(1)
+
+gui.Enabled = false
