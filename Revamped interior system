@@ -1,0 +1,197 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+local RoomsFolder = ReplicatedStorage:WaitForChild("Rooms")
+local ItemsFolder = ReplicatedStorage:WaitForChild("ClickObjects")
+
+local MainRoom = Workspace:WaitForChild("MainRoom")
+local GeneratedFolder = Workspace:WaitForChild("Generated")
+
+--------------------------------------------------
+-- SETTINGS
+--------------------------------------------------
+
+local MAX_ROOMS = 20
+local STOP_CHANCE = 0.15
+local ITEM_CHANCE = 0.25
+
+local roomCount = 0
+local usedDoors = {}
+local spawnedRooms = {}
+
+local keySpawned = false
+
+--------------------------------------------------
+-- UTIL
+--------------------------------------------------
+
+local function getDoors(model)
+	local doors = {}
+	for _, obj in pairs(model:GetDescendants()) do
+		if obj:IsA("Model") and obj:FindFirstChild("Base") then
+			table.insert(doors, obj)
+		end
+	end
+	return doors
+end
+
+local function getRoomDoor(room)
+	for _, obj in pairs(room:GetDescendants()) do
+		if obj:IsA("Model") and obj:FindFirstChild("Base") then
+			return obj
+		end
+	end
+	return nil
+end
+
+--------------------------------------------------
+-- ROOM PICKER (Stop filtered here)
+--------------------------------------------------
+
+local function getRandomRoom()
+	local rooms = RoomsFolder:GetChildren()
+
+	while true do
+		local chosen = rooms[math.random(1, #rooms)]
+
+		-- Stop room is filtered by chance
+		if chosen.Name == "Stop" then
+			if math.random() < STOP_CHANCE then
+				return chosen:Clone()
+			else
+				continue
+			end
+		end
+
+		return chosen:Clone()
+	end
+end
+
+--------------------------------------------------
+-- ITEMS
+--------------------------------------------------
+
+local function getRandomItem()
+	local list = ItemsFolder:GetChildren()
+	if #list == 0 then return nil end
+	return list[math.random(1, #list)]:Clone()
+end
+
+local function spawnItemInRoom(room)
+	local spawnPart = room:FindFirstChild("Item", true)
+	if not spawnPart then return end
+
+	if math.random() > ITEM_CHANCE then return end
+
+	local item
+
+	-- Key logic (spawn once)
+	if not keySpawned and math.random() < 0.2 then
+		item = ItemsFolder:FindFirstChild("Key")
+		if item then
+			keySpawned = true
+		end
+	end
+
+	if not item then
+		item = getRandomItem()
+	end
+
+	if not item then return end
+
+	local clone = item:Clone()
+	clone.Parent = GeneratedFolder
+
+	if clone:IsA("Model") then
+		clone:PivotTo(spawnPart.CFrame)
+	elseif clone:IsA("BasePart") then
+		clone.CFrame = spawnPart.CFrame
+	end
+end
+
+--------------------------------------------------
+-- SNAP SYSTEM (NO OFFSET)
+--------------------------------------------------
+
+local function placeRoom(mainDoor, room)
+	local mainBase = mainDoor:FindFirstChild("Base")
+	local roomDoor = getRoomDoor(room)
+
+	if not mainBase or not roomDoor then return false end
+
+	room:PivotTo(mainBase.CFrame * CFrame.Angles(0, math.rad(180), 0))
+	return true
+end
+
+--------------------------------------------------
+-- GENERATION
+--------------------------------------------------
+
+local function spawnFromDoor(mainDoor)
+	if usedDoors[mainDoor] then return end
+	if roomCount >= MAX_ROOMS then return end
+
+	local room = getRandomRoom()
+	if not room then return end
+
+	room.Parent = GeneratedFolder
+
+	if not placeRoom(mainDoor, room) then
+		room:Destroy()
+		return
+	end
+
+	roomCount += 1
+	usedDoors[mainDoor] = true
+	table.insert(spawnedRooms, room)
+
+	-- items
+	spawnItemInRoom(room)
+
+	local doors = getDoors(room)
+
+	-- dead end
+	if #doors <= 1 then
+		return
+	end
+
+	-- expand branches
+	for _, newDoor in ipairs(doors) do
+		if newDoor ~= getRoomDoor(room) then
+			spawnFromDoor(newDoor)
+		end
+	end
+end
+
+--------------------------------------------------
+-- START
+--------------------------------------------------
+
+for _, door in ipairs(getDoors(MainRoom)) do
+	spawnFromDoor(door)
+end
+
+--------------------------------------------------
+-- GUARANTEE KEY IF MISSED
+--------------------------------------------------
+
+if not keySpawned and #spawnedRooms > 0 then
+	local randomRoom = spawnedRooms[math.random(1, #spawnedRooms)]
+	local spawnPart = randomRoom:FindFirstChild("Item", true)
+
+	if spawnPart then
+		local key = ItemsFolder:FindFirstChild("Key")
+		if key then
+			local clone = key:Clone()
+			clone.Parent = GeneratedFolder
+
+			if clone:IsA("Model") then
+				clone:PivotTo(spawnPart.CFrame)
+			elseif clone:IsA("BasePart") then
+				clone.CFrame = spawnPart.CFrame
+			end
+
+			keySpawned = true
+		end
+	end
+end
