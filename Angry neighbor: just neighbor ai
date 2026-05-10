@@ -1,145 +1,162 @@
-print("scatman is best")
-
 local npc = script.Parent
 local humanoid = npc:WaitForChild("Humanoid")
 local root = npc:WaitForChild("HumanoidRootPart")
-local animstate = npc:WaitForChild("animstate")
 
-local Players = game:GetService("Players")
 local PathfindingService = game:GetService("PathfindingService")
+local Players = game:GetService("Players")
 
-local State = "Idle"
+-- CONFIG
+local DETECTION_RANGE = 60
+local LOST_TIME = 3
+
+-- STATES
+local STATE_IDLE = "Idle"
+local STATE_CHASE = "Chase"
+local state = STATE_IDLE
+
+local targetPlayer = nil
 local lastSeenTime = 0
 
-local WALK_SPEED = 10
-local CHASE_SPEED = 30
-local VISION_DISTANCE = 60
-
 ------------------------------------------------
--- GET PLAYER
+-- Utility: get random part in workspace
 ------------------------------------------------
+local function getRandomDestinationPart()
+	local parts = workspace:GetChildren()
+	local valid = {}
 
-local function getPlayer()
-	for _, p in pairs(Players:GetPlayers()) do
-		if p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
-			return p
+	for _, obj in ipairs(parts) do
+		if obj:IsA("BasePart") then
+			table.insert(valid, obj)
 		end
 	end
+
+	if #valid == 0 then return nil end
+	return valid[math.random(1, #valid)]
 end
 
 ------------------------------------------------
--- VISION CHECK
+-- Path movement
 ------------------------------------------------
-
-local function canSeePlayer(player)
-	if not player or not player.Character then return false end
-
-	local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-	if not hrp then return false end
-
-	local distance = (hrp.Position - root.Position).Magnitude
-	if distance > VISION_DISTANCE then return false end
-
-	-- simple raycast
-	local rayParams = RaycastParams.new()
-	rayParams.FilterDescendantsInstances = {npc}
-	rayParams.FilterType = Enum.RaycastFilterType.Blacklist
-
-	local result = workspace:Raycast(root.Position, (hrp.Position - root.Position), rayParams)
-
-	if result and not result.Instance:IsDescendantOf(player.Character) then
-		return false
-	end
-
-	return true
-end
-
-------------------------------------------------
--- PATHFIND
-------------------------------------------------
-
-local function moveTo(pos)
+local function moveTo(position)
 	local path = PathfindingService:CreatePath({
-		AgentCanJump = true,
 		AgentRadius = 2,
-		AgentHeight = 5
+		AgentHeight = 5,
+		AgentCanJump = true,
 	})
 
-	path:ComputeAsync(root.Position, pos)
+	path:ComputeAsync(root.Position, position)
 
 	if path.Status == Enum.PathStatus.Success then
-		for _, wp in ipairs(path:GetWaypoints()) do
-			if State ~= "Chase" then return end
-			humanoid:MoveTo(wp.Position)
+		for _, waypoint in ipairs(path:GetWaypoints()) do
+			humanoid:MoveTo(waypoint.Position)
 			humanoid.MoveToFinished:Wait()
 		end
 	end
 end
 
 ------------------------------------------------
--- IDLE
+-- Find closest valid player
 ------------------------------------------------
+local function getClosestPlayer()
+	local closest = nil
+	local closestDist = DETECTION_RANGE
 
-local function getRandomIdle()
-	local folder = workspace:WaitForChild("idlestuff")
-	local parts = folder:GetChildren()
-	if #parts == 0 then return nil end
-	return parts[math.random(1, #parts)]
-end
+	for _, player in ipairs(Players:GetPlayers()) do
+		local char = player.Character
+		if char and char:FindFirstChild("HumanoidRootPart") then
+			local hum = char:FindFirstChild("Humanoid")
 
-local function doIdle()
-	humanoid.WalkSpeed = WALK_SPEED
-	animstate.Value = "walk"
+			-- IMPORTANT RULE: ignore if sitting
+			if hum and not hum.Sit then
+				local dist = (char.HumanoidRootPart.Position - root.Position).Magnitude
 
-	local target = getRandomIdle()
-	if target then
-		humanoid:MoveTo(target.Position)
-		humanoid.MoveToFinished:Wait()
+				if dist < closestDist then
+					closestDist = dist
+					closest = player
+				end
+			end
+		end
 	end
 
-	animstate.Value = "idle"
-	task.wait(math.random(2,4))
+	return closest
+end
+
+------------------------------------------------
+-- IDLE STATE
+------------------------------------------------
+local function idleBehavior()
+	state = STATE_IDLE
+
+	while state == STATE_IDLE do
+		local part = getRandomDestinationPart()
+
+		if part then
+			moveTo(part.Position)
+		end
+
+		task.wait(1)
+	end
+end
+
+------------------------------------------------
+-- CHASE STATE
+------------------------------------------------
+local function chaseBehavior()
+	state = STATE_CHASE
+
+	while state == STATE_CHASE do
+		if not targetPlayer then break end
+
+		local char = targetPlayer.Character
+		if not char or not char:FindFirstChild("HumanoidRootPart") then
+			targetPlayer = nil
+			break
+		end
+
+		local hum = char:FindFirstChild("Humanoid")
+
+		-- stop chasing if player is sitting
+		if hum and hum.Sit then
+			targetPlayer = nil
+			break
+		end
+
+		local dist = (char.HumanoidRootPart.Position - root.Position).Magnitude
+
+		if dist <= DETECTION_RANGE then
+			lastSeenTime = tick()
+		end
+
+		-- follow player
+		moveTo(char.HumanoidRootPart.Position)
+
+		-- lost check
+		if tick() - lastSeenTime > LOST_TIME then
+			targetPlayer = nil
+			state = STATE_IDLE
+			break
+		end
+
+		task.wait(0.2)
+	end
 end
 
 ------------------------------------------------
 -- MAIN LOOP
 ------------------------------------------------
-
-while task.wait(0.2) do
-	local player = getPlayer()
-
-	-- SEE PLAYER → CHASE
-	if player and canSeePlayer(player) then
-		State = "Chase"
-		lastSeenTime = tick()
-	end
-
-	------------------------------------------------
-	-- CHASE STATE
-	------------------------------------------------
-	if State == "Chase" then
-		humanoid.WalkSpeed = CHASE_SPEED
-		animstate.Value = "run"
-
-		if player and player.Character then
-			local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-			if hrp then
-				humanoid:MoveTo(hrp.Position)
+task.spawn(function()
+	while true do
+		if state == STATE_IDLE then
+			local player = getClosestPlayer()
+			if player then
+				targetPlayer = player
+				lastSeenTime = tick()
+				chaseBehavior()
+			else
+				idleBehavior()
 			end
 		end
 
-		-- LOST PLAYER
-		if not (player and canSeePlayer(player)) then
-			if tick() - lastSeenTime > 3 then
-				State = "Idle"
-			end
-		end
+		task.wait(0.2)
 	end
-
-	------------------------------------------------
-	-- IDLE STATE
-	------------------------------------------------
-	if State == "Idle" then
-		doIdle()
-	end
-end
+end)
