@@ -29,6 +29,40 @@ local OpenEnds = {}
 local ItemSpawns = {}
 
 ------------------------------------------------
+-- BOUNDING BOX SYSTEM
+------------------------------------------------
+
+local function GetBox(model)
+	local cf, size = model:GetBoundingBox()
+	return cf, size
+end
+
+local function BoxesOverlap(cf1, size1, cf2, size2)
+	local p1 = cf1.Position
+	local p2 = cf2.Position
+
+	return math.abs(p1.X - p2.X) < (size1.X + size2.X) / 2
+		and math.abs(p1.Y - p2.Y) < (size1.Y + size2.Y) / 2
+		and math.abs(p1.Z - p2.Z) < (size1.Z + size2.Z) / 2
+end
+
+local function IsOverlapping(model)
+	local newCF, newSize = model:GetBoundingBox()
+
+	for _, obj in ipairs(Generated:GetChildren()) do
+		if obj:IsA("Model") then
+			local cf, size = obj:GetBoundingBox()
+
+			if BoxesOverlap(newCF, newSize, cf, size) then
+				return true
+			end
+		end
+	end
+
+	return false
+end
+
+------------------------------------------------
 -- UTIL
 ------------------------------------------------
 
@@ -41,7 +75,6 @@ local function SpawnRandomItem(itemPart)
 	local pool = Items:GetChildren()
 	if #pool == 0 then return end
 
-	-- item chance
 	if math.random(1, 4) ~= 1 then return end
 
 	local item = pool[math.random(#pool)]:Clone()
@@ -50,33 +83,30 @@ local function SpawnRandomItem(itemPart)
 end
 
 ------------------------------------------------
--- EXIT REGISTRATION (end + multi branching)
+-- EXIT HANDLING (end + multi)
 ------------------------------------------------
 
 local function RegisterExits(room)
 
-	-- normal exit
 	local endPart = room:FindFirstChild("end")
 	if endPart then
 		table.insert(OpenEnds, endPart)
 	end
 
-	-- branching exit
 	local multiPart = room:FindFirstChild("multi")
 
 	if multiPart then
-		-- always usable as an exit
 		table.insert(OpenEnds, multiPart)
 
-		-- sometimes duplicate to create branching pressure
-		if math.random(1, 100) <= 40 then
+		-- small chance extra branch pressure
+		if math.random(1, 100) <= 35 then
 			table.insert(OpenEnds, multiPart)
 		end
 	end
 end
 
 ------------------------------------------------
--- GENERATION
+-- GENERATION CORE
 ------------------------------------------------
 
 local function GenerateDungeon()
@@ -87,7 +117,6 @@ local function GenerateDungeon()
 	RoomsPlaced = 0
 	GoalPlaced = false
 
-	-- starting exits
 	table.insert(OpenEnds, MainRoom.Interior1)
 	table.insert(OpenEnds, MainRoom.Interior2)
 
@@ -98,36 +127,55 @@ local function GenerateDungeon()
 
 		local room = GetRandomInterior()
 
-		-- ensure primary part
 		if not room.PrimaryPart then
 			room.PrimaryPart = room:FindFirstChild("begin")
 		end
 
 		room:PivotTo(target.CFrame)
+
+		------------------------------------------------
+		-- OVERLAP CHECK (IMPORTANT)
+		------------------------------------------------
+
+		if IsOverlapping(room) then
+
+			room:Destroy()
+
+			local stop = StopRoom:Clone()
+
+			if not stop.PrimaryPart then
+				stop.PrimaryPart = stop:FindFirstChild("begin")
+			end
+
+			stop:PivotTo(target.CFrame)
+			stop.Parent = Generated
+
+			continue
+		end
+
 		room.Parent = Generated
 
 		------------------------------------------------
-		-- register new exits
+		-- register exits
 		------------------------------------------------
+
 		RegisterExits(room)
 
 		------------------------------------------------
-		-- item spawn points
+		-- item system
 		------------------------------------------------
+
 		local itemPart = room:FindFirstChild("item")
 		if itemPart then
 			table.insert(ItemSpawns, itemPart)
 			SpawnRandomItem(itemPart)
 		end
 
-		------------------------------------------------
-		Rooms counter
-		------------------------------------------------
 		RoomsPlaced += 1
 	end
 
 	------------------------------------------------
-	-- STOP ROOMS (cap all branches)
+	-- STOP CLOSURE
 	------------------------------------------------
 
 	for _, openEnd in ipairs(OpenEnds) do
@@ -159,7 +207,7 @@ local function GenerateDungeon()
 end
 
 ------------------------------------------------
--- START GENERATION
+-- BELL TRIGGER
 ------------------------------------------------
 
 Prompt.Triggered:Connect(function()
