@@ -10,123 +10,161 @@ local MainRoom = workspace:WaitForChild("MainRoom")
 
 local Prompt = workspace.Lobby.Bell.ProximityPrompt
 
-local MAX_ROOMS = math.random(30, 200)
-
 local Generating = false
 
+------------------------------------------------
+-- CONFIG
+------------------------------------------------
+
+local MAX_ROOMS = math.random(30, 200)
+
+------------------------------------------------
+-- STATE
+------------------------------------------------
+
+local RoomsPlaced = 0
+local GoalPlaced = false
+
+local OpenEnds = {}
+local ItemSpawns = {}
+
+------------------------------------------------
+-- UTIL
+------------------------------------------------
+
 local function GetRandomInterior()
-	local rooms = Interiors:GetChildren()
-
-	if #rooms == 0 then
-		error("No interiors found!")
-	end
-
-	return rooms[math.random(#rooms)]:Clone()
+	local list = Interiors:GetChildren()
+	return list[math.random(#list)]:Clone()
 end
 
 local function SpawnRandomItem(itemPart)
-	local items = Items:GetChildren()
+	local pool = Items:GetChildren()
+	if #pool == 0 then return end
 
-	if #items == 0 then
-		return
-	end
+	-- item chance
+	if math.random(1, 4) ~= 1 then return end
 
-	-- 25% chance
-	if math.random(1, 4) ~= 1 then
-		return
-	end
-
-	local item = items[math.random(#items)]:Clone()
-
+	local item = pool[math.random(#pool)]:Clone()
 	item:PivotTo(itemPart.CFrame)
 	item.Parent = Generated
 end
 
+------------------------------------------------
+-- EXIT REGISTRATION (end + multi branching)
+------------------------------------------------
+
+local function RegisterExits(room)
+
+	-- normal exit
+	local endPart = room:FindFirstChild("end")
+	if endPart then
+		table.insert(OpenEnds, endPart)
+	end
+
+	-- branching exit
+	local multiPart = room:FindFirstChild("multi")
+
+	if multiPart then
+		-- always usable as an exit
+		table.insert(OpenEnds, multiPart)
+
+		-- sometimes duplicate to create branching pressure
+		if math.random(1, 100) <= 40 then
+			table.insert(OpenEnds, multiPart)
+		end
+	end
+end
+
+------------------------------------------------
+-- GENERATION
+------------------------------------------------
+
 local function GenerateDungeon()
 
-	local RoomsPlaced = 0
-	local GoalPlaced = false
+	table.clear(OpenEnds)
+	table.clear(ItemSpawns)
 
-	local ItemSpawns = {}
-	local OpenEnds = {}
+	RoomsPlaced = 0
+	GoalPlaced = false
 
+	-- starting exits
 	table.insert(OpenEnds, MainRoom.Interior1)
 	table.insert(OpenEnds, MainRoom.Interior2)
 
 	while RoomsPlaced < MAX_ROOMS and #OpenEnds > 0 do
 
-		local endIndex = math.random(#OpenEnds)
-		local targetEnd = table.remove(OpenEnds, endIndex)
+		local index = math.random(#OpenEnds)
+		local target = table.remove(OpenEnds, index)
 
 		local room = GetRandomInterior()
 
+		-- ensure primary part
 		if not room.PrimaryPart then
-			local beginPart = room:FindFirstChild("begin")
-
-			if beginPart then
-				room.PrimaryPart = beginPart
-			else
-				warn(room.Name .. " has no begin part")
-				continue
-			end
+			room.PrimaryPart = room:FindFirstChild("begin")
 		end
 
-		room:PivotTo(targetEnd.CFrame)
+		room:PivotTo(target.CFrame)
 		room.Parent = Generated
 
-		local roomEnd = room:FindFirstChild("end")
+		------------------------------------------------
+		-- register new exits
+		------------------------------------------------
+		RegisterExits(room)
 
-		if roomEnd then
-			table.insert(OpenEnds, roomEnd)
-		end
-
+		------------------------------------------------
+		-- item spawn points
+		------------------------------------------------
 		local itemPart = room:FindFirstChild("item")
-
 		if itemPart then
 			table.insert(ItemSpawns, itemPart)
 			SpawnRandomItem(itemPart)
 		end
 
+		------------------------------------------------
+		Rooms counter
+		------------------------------------------------
 		RoomsPlaced += 1
 	end
 
-	-- Place Stop rooms on all remaining branches
+	------------------------------------------------
+	-- STOP ROOMS (cap all branches)
+	------------------------------------------------
+
 	for _, openEnd in ipairs(OpenEnds) do
 
 		local stop = StopRoom:Clone()
 
 		if not stop.PrimaryPart then
-			local beginPart = stop:FindFirstChild("begin")
-
-			if beginPart then
-				stop.PrimaryPart = beginPart
-			end
+			stop.PrimaryPart = stop:FindFirstChild("begin")
 		end
 
 		stop:PivotTo(openEnd.CFrame)
 		stop.Parent = Generated
 	end
 
-	-- Guarantee GoalItem exists
+	------------------------------------------------
+	-- GUARANTEE GOAL ITEM (Diamond)
+	------------------------------------------------
+
 	if not GoalPlaced and #ItemSpawns > 0 then
 
-		local spawnPoint = ItemSpawns[math.random(#ItemSpawns)]
+		local spawn = ItemSpawns[math.random(#ItemSpawns)]
 
 		local diamond = GoalItem:Clone()
-
-		diamond.CFrame = spawnPoint.CFrame
+		diamond.CFrame = spawn.CFrame
 		diamond.Parent = Generated
 
 		GoalPlaced = true
 	end
 end
 
+------------------------------------------------
+-- START GENERATION
+------------------------------------------------
+
 Prompt.Triggered:Connect(function()
 
-	if Generating then
-		return
-	end
-
+	if Generating then return end
 	Generating = true
 
 	Generated:ClearAllChildren()
