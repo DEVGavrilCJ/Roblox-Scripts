@@ -1,0 +1,13 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local AnimationPlayer = require(ReplicatedStorage:WaitForChild("AnimationPlayer"))
+local event = ReplicatedStorage:WaitForChild("playanim")
+
+event.OnClientEvent:Connect(function(character, animName, looped, speed)
+	local animModule = ReplicatedStorage.Animations:FindFirstChild(animName)
+	if not animModule then return end
+
+	local animTable = require(animModule)
+
+	AnimationPlayer.Play(character, animTable, looped, speed)
+end)
